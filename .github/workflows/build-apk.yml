@@ -10,47 +10,62 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # 1️⃣ Checkout repo
     - name: Checkout repository
       uses: actions/checkout@v4
 
+    # 2️⃣ Java 17 (required)
     - name: Setup Java 17
       uses: actions/setup-java@v4
       with:
         distribution: temurin
         java-version: 17
 
+    # 3️⃣ Android SDK (official)
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
+    # 4️⃣ Accept licenses
     - name: Accept Android licenses
       run: yes | sdkmanager --licenses
 
-    - name: Install required SDK packages
+    # 5️⃣ Install exact SDK packages required by repo
+    - name: Install Android SDK packages
       run: |
         sdkmanager \
           "platform-tools" \
           "platforms;android-33" \
           "build-tools;33.0.2"
 
-    # 🔑 THIS IS THE MISSING PIECE
+    # 6️⃣ Repo expects ./cmdline-tools → create symlink
     - name: Link cmdline-tools into project root
       run: |
         ln -s "$ANDROID_SDK_ROOT/cmdline-tools" ./cmdline-tools
         ls -l cmdline-tools
 
+    # 7️⃣ 🔑 FIX SDK ENV CONFLICT (THIS WAS THE LAST ERROR)
+    - name: Fix Android SDK environment variables
+      run: |
+        echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+        echo "ANDROID_HOME=" >> $GITHUB_ENV
+
+    # 8️⃣ Permissions
     - name: Make scripts executable
       run: |
         chmod +x gradlew
         chmod +x make.sh
 
-    - name: Generate keystore (if not exists)
+    # 9️⃣ Generate keystore (safe to re-run)
+    - name: Generate keystore
       run: |
         ./make.sh keygen || true
 
+    # 🔟 Build APK
     - name: Build APK
       run: |
         ./make.sh build webapk.conf
 
+    # 1️⃣1️⃣ Upload APK
     - name: Upload APK artifact
       uses: actions/upload-artifact@v4
       with:
