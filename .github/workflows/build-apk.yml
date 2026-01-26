@@ -19,7 +19,6 @@ jobs:
         distribution: temurin
         java-version: 17
 
-    # ✅ ANDROID SDK + adb + build-tools
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
@@ -32,6 +31,12 @@ jobs:
           "platform-tools" \
           "platforms;android-33" \
           "build-tools;33.0.2"
+
+    # 🔑 THIS IS THE MISSING PIECE
+    - name: Link cmdline-tools into project root
+      run: |
+        ln -s "$ANDROID_SDK_ROOT/cmdline-tools" ./cmdline-tools
+        ls -l cmdline-tools
 
     - name: Make scripts executable
       run: |
