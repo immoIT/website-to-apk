@@ -1,12 +1,21 @@
 // ==UserScript==
-// @name         TV Back Button – Custom Player (3s timeout)
+// @name         TV Unified Controls + Dark Mode Fix
 // @run-at       document-start
 // ==/UserScript==
 
 (function () {
+
+    /* -------------------------------
+       STATE
+    --------------------------------*/
     let lastBackTime = 0;
     let hideTimer = null;
+    let navigationActive = false;
+    let navTimeout = null;
 
+    /* -------------------------------
+       UTILITIES
+    --------------------------------*/
     function clearHideTimer() {
         if (hideTimer) {
             clearTimeout(hideTimer);
@@ -14,33 +23,41 @@
         }
     }
 
-    function hideControls(video) {
-        if (!video) return;
-        // Most custom players hide on inactivity automatically,
-        // we just stop sending interaction events
+    function scheduleHide() {
+        clearHideTimer();
+        hideTimer = setTimeout(() => {
+            if (!navigationActive) {
+                // custom players auto-hide on inactivity
+            }
+        }, 3000);
     }
 
+    function getVideo() {
+        return document.querySelector("video");
+    }
+
+    /* -------------------------------
+       PLAYER CONTROLS
+    --------------------------------*/
     function showCustomPlayerControls() {
-        const video = document.querySelector("video");
+        const video = getVideo();
         if (!video) return false;
 
-        // ❌ never show native controls
+        // NEVER allow native controls
         video.controls = false;
 
-        // Simulate interaction to show custom UI
-        video.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
-        video.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-        video.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-        video.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        // Simulate user interaction for custom UI
+        ["mousemove", "mousedown", "mouseup", "click"].forEach(evt =>
+            video.dispatchEvent(new MouseEvent(evt, { bubbles: true }))
+        );
 
-        // Reset hide timer to 3 seconds
-        clearHideTimer();
-        hideTimer = setTimeout(() => hideControls(video), 3000);
-
+        scheduleHide();
         return true;
     }
 
-    // Remove focus / outline / outer highlight lines globally
+    /* -------------------------------
+       STYLE FIXES (NO OUTLINES)
+    --------------------------------*/
     const style = document.createElement("style");
     style.innerHTML = `
         *:focus {
@@ -53,12 +70,13 @@
     `;
     document.documentElement.appendChild(style);
 
-    // Ensure history stack exists
+    /* -------------------------------
+       BACK BUTTON HANDLING
+    --------------------------------*/
     if (history.length < 2) {
         history.pushState(null, "", location.href);
     }
 
-    // BACK button handling
     window.addEventListener("popstate", () => {
         const now = Date.now();
 
@@ -71,17 +89,60 @@
                 history.pushState(null, "", location.href);
             }
         }
-        // Second BACK → app exits (handled by requireDoubleBackToExit)
+        // Second BACK → app exits (handled by APK)
     });
 
-    // Any user interaction resets the 3s timer
-    ["click", "mousemove", "touchstart", "keydown"].forEach(evt => {
-        document.addEventListener(evt, () => {
-            const video = document.querySelector("video");
-            if (!video) return;
+    /* -------------------------------
+       NAVIGATION (TV REMOTE)
+    --------------------------------*/
+    document.addEventListener("keydown", e => {
+        const navKeys = [
+            "ArrowUp",
+            "ArrowDown",
+            "ArrowLeft",
+            "ArrowRight",
+            "Enter",
+            "OK"
+        ];
 
-            clearHideTimer();
-            hideTimer = setTimeout(() => hideControls(video), 3000);
+        if (!navKeys.includes(e.key)) return;
+
+        navigationActive = true;
+        scheduleHide();
+
+        clearTimeout(navTimeout);
+        navTimeout = setTimeout(() => {
+            navigationActive = false;
+        }, 3000);
+    }, true);
+
+    /* -------------------------------
+       INTERACTION RESETS TIMER
+    --------------------------------*/
+    ["click", "mousemove", "touchstart"].forEach(evt => {
+        document.addEventListener(evt, () => {
+            scheduleHide();
         }, true);
     });
+
+    /* -------------------------------
+       DARK MODE TOGGLE FIX
+    --------------------------------*/
+    function applyDarkMode(forceDark) {
+        document.documentElement.classList.toggle("dark", forceDark);
+        document.body.classList.toggle("dark", forceDark);
+        localStorage.setItem("theme", forceDark ? "dark" : "light");
+    }
+
+    document.addEventListener("click", e => {
+        const toggle = e.target.closest(
+            "[data-theme-toggle], .theme-toggle, .dark-toggle"
+        );
+        if (!toggle) return;
+
+        e.preventDefault();
+        const isDark = document.documentElement.classList.contains("dark");
+        applyDarkMode(!isDark);
+    }, true);
+
 })();
