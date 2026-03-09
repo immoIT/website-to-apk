@@ -28,6 +28,7 @@
         video.controls = false;
 
         // Simulate interaction to show custom UI
+        // Dispatching multiple events to ensure the player UI wakes up
         video.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
         video.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
         video.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
@@ -53,26 +54,56 @@
     `;
     document.documentElement.appendChild(style);
 
-    // Ensure history stack exists
+    // Ensure history stack exists for popstate fallback
     if (history.length < 2) {
         history.pushState(null, "", location.href);
     }
 
-    // BACK button handling
-    window.addEventListener("popstate", () => {
+    // --- UPDATED BACK BUTTON HANDLING ---
+
+    function handleBackAction(e) {
         const now = Date.now();
 
-        // First BACK → show controls
+        // Check if it is a "Single Press" (more than 800ms since last press)
         if (now - lastBackTime > 800) {
             const handled = showCustomPlayerControls();
-            lastBackTime = now;
-
+            
             if (handled) {
+                lastBackTime = now;
+                
+                // IMPORTANT: Stop the immediate "Back" (Exit) action so controls can show
+                if (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                }
+
+                // Re-push state to keep the "trap" active for the next press
                 history.pushState(null, "", location.href);
             }
+        } 
+        // If pressed again quickly (< 800ms), we do NOT preventDefault.
+        // This allows the browser's native "Back" behavior (Exit) to happen.
+    }
+
+    // 1. Listen for Hardware Key Events (Crucial for TV Remotes)
+    window.addEventListener("keydown", (e) => {
+        // Key codes: 
+        // 27 (Escape/Android Back)
+        // 461 (LG WebOS Back)
+        // 10009 (Samsung Tizen Return)
+        // 8 (Backspace)
+        if (e.keyCode === 27 || e.keyCode === 461 || e.keyCode === 10009 || e.keyCode === 8 || e.key === "Escape" || e.key === "Back") {
+            handleBackAction(e);
         }
-        // Second BACK → app exits (handled by requireDoubleBackToExit)
+    }, true); // Use capture phase to intercept before other scripts
+
+    // 2. Keep popstate as a fallback for standard browser navigation
+    window.addEventListener("popstate", (e) => {
+        handleBackAction(e);
     });
+
+    // --- END UPDATED HANDLING ---
 
     // Any user interaction resets the 3s timer
     ["click", "mousemove", "touchstart", "keydown"].forEach(evt => {
