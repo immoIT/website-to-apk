@@ -69,8 +69,14 @@ set_var() {
         error "Variable '$var_name' not found in MainActivity.java"
     fi
 
-    # Add quotes if value is not boolean
-    if [[ ! "$new_value" =~ ^(true|false)$ ]]; then
+    # Remove surrounding quotes (double or single) if provided in the config
+    new_value="${new_value%\"}"
+    new_value="${new_value#\"}"
+    new_value="${new_value%\'}"
+    new_value="${new_value#\'}"
+
+    # Add quotes if value is not boolean AND not a number/integer
+    if [[ ! "$new_value" =~ ^(true|false)$ ]] && [[ ! "$new_value" =~ ^[0-9]+$ ]]; then
         new_value="\"$new_value\""
     fi
 
@@ -115,6 +121,7 @@ set_var() {
         rm "$tmp_file"
     fi
 }
+
 
 merge_config_with_default() {
     local default_conf="app/default.conf"
@@ -765,7 +772,13 @@ check_and_find_java() {
 }
 
 build() {
-    apply_config $@
+    local config_arg="${1-}"
+
+    if [ -n "$config_arg" ] && [ -d "$config_arg" ]; then
+        config_arg="$config_arg/webapk.conf"
+    fi
+
+    apply_config "$config_arg"
     apk
 }
 

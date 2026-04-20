@@ -96,7 +96,6 @@ public class MainActivity extends AppCompatActivity {
     private WebView webview;
     private UserScriptManager userScriptManager;
     private ProgressBar spinner;
-    private Animation fadeInAnimation;
     private View mainLayout;
     private View errorLayout;
     private ViewGroup parentLayout;
@@ -138,6 +137,8 @@ public class MainActivity extends AppCompatActivity {
     boolean edgeToEdge = false;
     boolean forceDarkTheme = false;
     boolean allowMixedContent = false;
+    String cacheMode = "default";
+    int fadeInDuration = 400;
     boolean DebugWebView = false;
 
     boolean geolocationEnabled = false;
@@ -189,9 +190,8 @@ public class MainActivity extends AppCompatActivity {
             mainURL = data.toString();
         }
 
-        fadeInAnimation = AnimationUtils.loadAnimation(this, R.anim.fade_in);
-
         webview = findViewById(R.id.webView);
+        webview.setAlpha(0f);
         spinner = findViewById(R.id.progressBar1);
         webview.setWebViewClient(new CustomWebViewClient());
         webview.setWebChromeClient(new CustomWebChrome());
@@ -208,6 +208,8 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setSavePassword(SavePassword);
         webSettings.setAllowFileAccess(AllowFileAccess);
         webSettings.setAllowFileAccessFromFileURLs(AllowFileAccessFromFileURLs);
+        webSettings.setUseWideViewPort(true);
+        webSettings.setLoadWithOverviewMode(true);
         webview.setWebContentsDebuggingEnabled(DebugWebView);
 
         if (allowMixedContent) {
@@ -218,7 +220,22 @@ public class MainActivity extends AppCompatActivity {
             webSettings.setUserAgentString(userAgent);
         }
 
-        webSettings.setCacheMode(WebSettings.LOAD_DEFAULT);
+        switch (cacheMode) {
+            case "aggressive":
+                // Offline-first: Use cache if content is there, otherwise load from network.
+                webSettings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
+                break;
+            case "no_cache":
+                // Always load from the network, do not use the cache
+                webSettings.setCacheMode(WebSettings.LOAD_NO_CACHE);
+                webview.clearCache(true);
+                break;
+            default:
+                // Uses cache based on server's "Cache-Control" headers
+                webSettings.setCacheMode(WebSettings.LOAD_DEFAULT);
+                break;
+        }
+
         webview.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
 
         CookieManager cookieManager = CookieManager.getInstance();
@@ -785,6 +802,14 @@ public class MainActivity extends AppCompatActivity {
         // Handle SSL issue
         @Override
         public void onReceivedSslError(WebView view, final SslErrorHandler handler, SslError error) {
+            String failingUrl = error.getUrl();
+            String currentUrl = view.getUrl();
+            boolean isMainPage = (currentUrl != null && failingUrl != null && failingUrl.equals(currentUrl));
+            if (!isMainPage) {
+                handler.cancel();
+                return;
+            }
+
             final AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
             builder.setMessage(R.string.notification_error_ssl_cert_invalid);
 
@@ -996,9 +1021,8 @@ public class MainActivity extends AppCompatActivity {
             if (!errorOccurred) {
                 Log.d("WebToApk","Current page: " + url);
                 spinner.setVisibility(View.GONE);
-                if (!webview.isShown()) {
-                    webview.startAnimation(fadeInAnimation);
-                    webview.setVisibility(View.VISIBLE);
+                if (webview.getAlpha() == 0f) {
+                    webview.animate().alpha(1f).setDuration(fadeInDuration).start();
                 }
             }
             super.onPageFinished(webview, url);
@@ -1090,7 +1114,7 @@ public class MainActivity extends AppCompatActivity {
     public void tryAgain(View v) {
         parentLayout.removeView(errorLayout);
         parentLayout.addView(mainLayout);
-        webview.setVisibility(View.GONE);
+        webview.setAlpha(0f);
         spinner.setVisibility(View.VISIBLE);
         errorOccurred = false;
         webview.reload();
@@ -1320,6 +1344,15 @@ public class MainActivity extends AppCompatActivity {
             context.startService(intent);
         }
 
+        @JavascriptInterface
+        public void clearAppCache() {
+            new Handler(Looper.getMainLooper()).post(() -> {
+                if (webview != null) {
+                    webview.clearCache(true);
+                    Log.d("WebToApk", "Cache cleared via WebToAPK.clearAppCache() from js");
+                }
+            });
+        }
     }
 
 }
