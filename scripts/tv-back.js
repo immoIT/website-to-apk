@@ -1,10 +1,14 @@
 // ==UserScript==
-// @name         TV Back Button – Curl.js Deep Integration
+// @name         TV Back Button & Cursor Fix – Curl.js Deep Integration
 // @run-at       document-idle
 // ==/UserScript==
 
 (function () {
-    // 1. HISTORY TRAP: Catches aggressive Android TV hardware back navigation
+    /* =========================================================
+       1. TV BACK BUTTON & HISTORY MANAGEMENT
+       ========================================================= */
+
+    // HISTORY TRAP: Catches aggressive Android TV hardware back navigation
     function ensureHistoryTrap() {
         if (!history.state || history.state.tvTrap !== true) {
             history.pushState({ tvTrap: true }, "", location.href);
@@ -14,7 +18,7 @@
     // Initialize trap on load
     ensureHistoryTrap();
 
-    // 2. CORE LOGIC: Reads curl.js state to decide what to do
+    // CORE LOGIC: Reads curl.js state to decide what to do
     function handlePlayerBackAction(e) {
         const controls = document.getElementById('controls');
         const wrapper = document.getElementById('wrapper');
@@ -55,7 +59,7 @@
         // allowing the TV back button to return to normal dashboard navigation.
     }
 
-    // 3. EVENT LISTENER: Hardware Key Interception (Capture Phase)
+    // EVENT LISTENER: Hardware Key Interception (Capture Phase)
     window.addEventListener("keydown", (e) => {
         // Prevent infinite loops if our script dispatches an artificial keystroke
         if (!e.isTrusted) return;
@@ -78,7 +82,7 @@
         }
     }, true); 
 
-    // 4. EVENT LISTENER: Popstate Interception (For WebViews that force history nav)
+    // EVENT LISTENER: Popstate Interception (For WebViews that force history nav)
     window.addEventListener("popstate", (e) => {
         const playerModal = document.getElementById('playerModal');
         
@@ -88,13 +92,70 @@
         }
     });
 
-    // 5. GLOBAL STYLE CLEANUP: Removes TV focus rings
+
+    /* =========================================================
+       2. VIRTUAL CURSOR & CSS OVERRIDES FOR ANDROID TV
+       ========================================================= */
+
+    // GLOBAL STYLE CLEANUP: Removes TV focus rings and forces cursor visibility
     const style = document.createElement("style");
     style.innerHTML = `
+        /* Remove TV Focus Rings globally */
         *:focus {
             outline: none !important;
             box-shadow: none !important;
         }
+        /* Override curl.js 'cursor: none' and force it to be visible */
+        * {
+            cursor: default !important;
+        }
+        #wrapper, .player-wrapper, video, body {
+            cursor: default !important;
+        }
     `;
     document.documentElement.appendChild(style);
+
+    // Create a Virtual Hardware Cursor for Android TV Fullscreen/Landscape
+    const virtualCursor = document.createElement("div");
+    virtualCursor.id = "tv-virtual-cursor";
+    virtualCursor.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        width: 25px;
+        height: 25px;
+        background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="white" stroke="black" stroke-width="1.5" d="M7 2l12 11.2-5.8.5 3.3 7.3-2.2.9-3.2-7.4-4.4 4.7z"/></svg>');
+        background-size: contain;
+        background-repeat: no-repeat;
+        pointer-events: none; /* Let clicks pass through to buttons */
+        z-index: 2147483647; /* Force to absolute top above everything */
+        display: none;
+        transform: translate(-2px, -2px); /* Adjust clicking hotspot */
+        transition: none; /* Must be instant for smooth tracking */
+    `;
+    document.body.appendChild(virtualCursor);
+
+    // Track Mouse Movement and Force Arrow
+    window.addEventListener("mousemove", (e) => {
+        const wrapper = document.getElementById("wrapper");
+        const isFullscreen = document.fullscreenElement != null;
+        const isRotated = wrapper && wrapper.classList.contains("player-landscape");
+
+        // Android TV WebView hides native cursor in fullscreen/landscape.
+        // We force our virtual cursor to show up in these states.
+        if (isFullscreen || isRotated) {
+            virtualCursor.style.display = "block";
+            virtualCursor.style.left = e.clientX + "px";
+            virtualCursor.style.top = e.clientY + "px";
+        } else {
+            // Normal mode - let native cursor take over
+            virtualCursor.style.display = "none";
+        }
+    }, true); // Use capture phase
+
+    // Hide virtual cursor if mouse leaves screen entirely
+    window.addEventListener("mouseout", () => {
+        virtualCursor.style.display = "none";
+    });
+
 })();
