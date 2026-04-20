@@ -1,151 +1,100 @@
 // ==UserScript==
-// @name         TV Back Button – Custom Player Deep Fix (3s timeout)
-// @run-at       document-start
+// @name         TV Back Button – Curl.js Deep Integration
+// @run-at       document-idle
 // ==/UserScript==
 
 (function () {
-    let lastBackTime = 0;
-    let hideTimer = null;
-    
-    // Deep Configuration Thresholds
-    const DOUBLE_PRESS_TIMEOUT = 800; // ms to trigger Exit
-    const DEBOUNCE_TIMEOUT = 250;     // ms to ignore TV double-firing glitches
-
-    function clearHideTimer() {
-        if (hideTimer) {
-            clearTimeout(hideTimer);
-            hideTimer = null;
+    // 1. HISTORY TRAP: Catches aggressive Android TV hardware back navigation
+    function ensureHistoryTrap() {
+        if (!history.state || history.state.tvTrap !== true) {
+            history.pushState({ tvTrap: true }, "", location.href);
         }
     }
 
-    function hideControls(video) {
-        if (!video) return;
-        // The custom player's native inactive timer will take over
-    }
+    // Initialize trap on load
+    ensureHistoryTrap();
 
-    function showCustomPlayerControls() {
-        const video = document.querySelector("video");
-        if (!video) return false;
-
-        // Never show raw HTML5 controls
-        video.controls = false;
-
-        // DEEP FIX: Find the actual UI wrapper layer on top of the video
-        const rect = video.getBoundingClientRect();
-        const centerX = rect.left + (rect.width / 2);
-        const centerY = rect.top + (rect.height / 2);
+    // 2. CORE LOGIC: Reads curl.js state to decide what to do
+    function handlePlayerBackAction(e) {
+        const controls = document.getElementById('controls');
+        const wrapper = document.getElementById('wrapper');
         
-        // Target the overlay, fallback to video parent, fallback to body
-        const targetElement = document.elementFromPoint(centerX, centerY) || video.parentElement || document.body;
+        // Read native curl.js states
+        const isControlsHidden = controls && controls.classList.contains('ui-hidden');
+        const isRotated = wrapper && wrapper.classList.contains('player-landscape');
 
-        const eventOpts = { bubbles: true, cancelable: true, clientX: centerX, clientY: centerY };
+        // SCENARIO 1: Controls are hidden -> SINGLE PRESS: Show Controls
+        if (isControlsHidden) {
+            // Wake up curl.js native controls by simulating a mousemove on its wrapper
+            if (wrapper) {
+                wrapper.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true }));
+                wrapper.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, cancelable: true }));
+            }
+            ensureHistoryTrap(); // Keep the trap alive for the next press
+            return;
+        }
 
-        // 1. Dispatch pointer events to the overlay to wake up the UI
-        targetElement.dispatchEvent(new MouseEvent("mousemove", eventOpts));
-        targetElement.dispatchEvent(new PointerEvent("pointermove", eventOpts));
-        targetElement.dispatchEvent(new MouseEvent("mouseover", eventOpts));
+        // SCENARIO 2: Controls are visible, but player is in Landscape/Rotation mode
+        if (isRotated) {
+            // Exit rotation first (don't close the player yet)
+            // Dispatch a non-trusted Escape key so curl.js's native listener handles the un-rotation
+            document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true
+            }));
+            ensureHistoryTrap(); 
+            return;
+        }
 
-        // 2. Dispatch a harmless keystroke (Shift) - highly effective for TV players
-        document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Shift", code: "ShiftLeft", keyCode: 16 }));
-
-        // Reset hide timer to 3 seconds
-        clearHideTimer();
-        hideTimer = setTimeout(() => hideControls(video), 3000);
-
-        return true;
+        // SCENARIO 3: Controls are visible, normal orientation -> DOUBLE PRESS: Exit Player
+        const closeBtn = document.getElementById('closePlayerBtn');
+        if (closeBtn) {
+            closeBtn.click(); // Triggers curl.js native closePlayer() function cleanly
+        }
+        
+        // Note: We do NOT re-arm the trap here. The player is closed, 
+        // allowing the TV back button to return to normal dashboard navigation.
     }
 
-    // Remove focus / outline / outer highlight lines globally
+    // 3. EVENT LISTENER: Hardware Key Interception (Capture Phase)
+    window.addEventListener("keydown", (e) => {
+        // Prevent infinite loops if our script dispatches an artificial keystroke
+        if (!e.isTrusted) return;
+
+        const isBackKey = e.keyCode === 27 || e.keyCode === 461 || e.keyCode === 10009 || e.keyCode === 8 || e.key === "Escape" || e.key === "Back";
+        
+        if (isBackKey) {
+            const playerModal = document.getElementById('playerModal');
+            
+            // Only intercept the back button if the curl.js Player Modal is actively open
+            if (playerModal && playerModal.classList.contains('show')) {
+                
+                // Stop curl.js or Bootstrap from acting immediately
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                
+                handlePlayerBackAction(e);
+            }
+        }
+    }, true); 
+
+    // 4. EVENT LISTENER: Popstate Interception (For WebViews that force history nav)
+    window.addEventListener("popstate", (e) => {
+        const playerModal = document.getElementById('playerModal');
+        
+        // If the player is open and the browser forced a history back action, stop it
+        if (playerModal && playerModal.classList.contains('show')) {
+            handlePlayerBackAction(e);
+        }
+    });
+
+    // 5. GLOBAL STYLE CLEANUP: Removes TV focus rings
     const style = document.createElement("style");
     style.innerHTML = `
         *:focus {
             outline: none !important;
             box-shadow: none !important;
         }
-        video::-webkit-media-controls {
-            display: none !important;
-        }
     `;
     document.documentElement.appendChild(style);
-
-    // DEEP FIX: Robust History Trap Management
-    function ensureHistoryTrap() {
-        if (!history.state || history.state.tvTrap !== true) {
-            history.pushState({ tvTrap: true }, "", location.href);
-        }
-    }
-    
-    // Set initial trap
-    ensureHistoryTrap();
-
-    function handleBackAction(e) {
-        const now = Date.now();
-        const timeDiff = now - lastBackTime;
-
-        // 1. DEBOUNCE: Ignore duplicate events from Android TV (keydown + popstate firing together)
-        if (timeDiff < DEBOUNCE_TIMEOUT) {
-            if (e.type === "popstate") ensureHistoryTrap(); // Restore trap if popstate consumed it natively
-            if (e.type !== "popstate" && e.preventDefault) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-            return; // Exit early, don't update lastBackTime
-        }
-
-        // 2. DOUBLE PRESS: Exit the player
-        if (timeDiff <= DOUBLE_PRESS_TIMEOUT) {
-            // If the trap is currently active, we need to manually bypass it to force exit
-            if (e.type === "popstate") {
-                history.back(); // Popstate already consumed the trap, go back once more to exit
-            } else {
-                history.back(); // Consume trap
-                setTimeout(() => history.back(), 50); // Execute actual exit
-            }
-            return;
-        }
-
-        // 3. SINGLE PRESS: Show Controls
-        const handled = showCustomPlayerControls();
-        if (handled) {
-            lastBackTime = now;
-            
-            if (e.type === "popstate") {
-                // If popstate fired, the browser consumed our trap. We must put it back.
-                ensureHistoryTrap();
-            } else {
-                // If keydown caught it, prevent the browser from executing popstate natively.
-                if (e.preventDefault) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                }
-            }
-        }
-    }
-
-    // Listeners for TV Remote Hardware Keys
-    window.addEventListener("keydown", (e) => {
-        if (e.keyCode === 27 || e.keyCode === 461 || e.keyCode === 10009 || e.keyCode === 8 || e.key === "Escape" || e.key === "Back") {
-            handleBackAction(e);
-        }
-    }, true);
-
-    // Fallback for native browser back navigation 
-    window.addEventListener("popstate", (e) => {
-        handleBackAction(e);
-    });
-
-    // Reset the 3s timer on standard user interaction
-    ["click", "mousemove", "touchstart", "keydown"].forEach(evt => {
-        document.addEventListener(evt, (e) => {
-            // Ignore if it's the back button triggering this
-            if (e.type === 'keydown' && (e.keyCode === 27 || e.keyCode === 461 || e.keyCode === 10009 || e.keyCode === 8)) return;
-            
-            const video = document.querySelector("video");
-            if (video) {
-                clearHideTimer();
-                hideTimer = setTimeout(() => hideControls(video), 3000);
-            }
-        }, true);
-    });
 })();
