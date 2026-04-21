@@ -1,12 +1,11 @@
 // ==UserScript==
-// @name         TV Back Button & Cursor Fix – Ultimate V2 (Hover Support)
+// @name         TV Back Button & Cursor Fix – Seamless V3
 // @run-at       document-idle
 // ==/UserScript==
 
 (function () {
     let lastBackTime = 0;
-    let idleTimeout = null;
-    let isHovering = false; // Check karega ki mouse/touch controls ke upar hai ya nahi
+    let isHovering = false; // TV Virtual Cursor hover check
 
     /* =========================================================
        1. HISTORY TRAP & PLAYER STATES
@@ -26,7 +25,9 @@
             mutations.forEach((mutation) => {
                 if (mutation.target.classList.contains('show')) {
                     ensureHistoryTrap();
-                    resetIdleTimer(); // Player khulte hi UI dikhao aur timer chalu karo
+                    // Naye curl.js ko trigger karo UI show karne ke liye (native timer start hoga)
+                    const wrapper = document.getElementById('wrapper');
+                    if (wrapper) wrapper.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
                 } else if (location.hash === '#tv-trap') {
                     history.back(); 
                 }
@@ -36,49 +37,13 @@
     }
 
     /* =========================================================
-       2. SMART UI VISIBILITY CONTROLLER (3-SEC LOGIC)
-       ========================================================= */
-    function forceShowUI() {
-        const els = ['controls', 'videoTitle', 'centerPlayBtn', 'closePlayerBtn'];
-        els.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.classList.remove('ui-hidden');
-        });
-        const wrapper = document.getElementById('wrapper');
-        if (wrapper) wrapper.style.cursor = "default";
-    }
-
-    function forceHideUI() {
-        const video = document.getElementById('video');
-        
-        // STRICT CONDITION: Agar video paused hai ya mouse controls ke upar hai, toh hide mat karo
-        if ((video && video.paused) || isHovering) return;
-        
-        const els = ['controls', 'videoTitle', 'centerPlayBtn', 'closePlayerBtn'];
-        els.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.classList.add('ui-hidden');
-        });
-        const wrapper = document.getElementById('wrapper');
-        if (wrapper) wrapper.style.cursor = "none";
-    }
-
-    function resetIdleTimer() {
-        forceShowUI(); // Movement hote hi UI show karo
-        if (idleTimeout) clearTimeout(idleTimeout); // Purana timer cancel karo
-        
-        // Naya 3 second ka timer lagao
-        idleTimeout = setTimeout(forceHideUI, 3000);
-    }
-
-    /* =========================================================
-       3. BACK BUTTON LOGIC
+       2. BACK BUTTON LOGIC
        ========================================================= */
     function handlePlayerBackAction(e) {
         const now = Date.now();
         const timeDiff = now - lastBackTime;
         
-        // Debounce: Android TV glitch roko
+        // Debounce: Android TV glitch protection
         if (timeDiff < 250) {
             if (e.type === 'popstate') ensureHistoryTrap();
             return;
@@ -99,25 +64,39 @@
         const isControlsHidden = controls && controls.classList.contains('ui-hidden');
         const isRotated = wrapper && wrapper.classList.contains('player-landscape');
 
-        // Agar landscape hai toh pehle screen seedhi karo
+        // SCENARIO 1: Agar landscape hai, pehle usey normal karo
         if (isRotated) {
             document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
             ensureHistoryTrap();
             return;
         }
 
-        // Agar controls chhupe hain toh show karo aur 3 second ka timer shuru karo
+        // SCENARIO 2: Agar controls chhupe hain -> Native curl.js ko event bhej kar UI dikhao
         if (isControlsHidden) {
-            resetIdleTimer(); 
+            if (wrapper) {
+                // Ye direct curl (4).js ka 5-second native timer start kar dega
+                wrapper.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true }));
+            }
             ensureHistoryTrap();
             return;
         }
         
-        // Agar controls dikh rahe hain, toh chupa do (unless hum hover kar rahe hain)
+        // SCENARIO 3: Agar controls dikh rahe hain aur hum hover NAHI kar rahe -> Force Hide karo
         if (!isControlsHidden) {
-            if (!isHovering) forceHideUI();
+            if (!isHovering) {
+                const video = document.getElementById('video');
+                // Video paused hone par manually chupaane ki zaroorat nahi
+                if (video && !video.paused) {
+                    const els = ['controls', 'videoTitle', 'centerPlayBtn', 'closePlayerBtn'];
+                    els.forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) el.classList.add('ui-hidden');
+                    });
+                    if (wrapper) wrapper.style.cursor = "none";
+                }
+            }
             if (typeof showToast === 'function') {
-                showToast('Double-press BACK button to exit video', 'warning');
+                showToast('Double-press BACK to exit video', 'warning');
             }
             ensureHistoryTrap();
             return;
@@ -146,7 +125,7 @@
     });
 
     /* =========================================================
-       4. VIRTUAL CURSOR, HOVER DETECTION & ANTI-HIDE HACK
+       3. VIRTUAL CURSOR & HOVER DETECTION
        ========================================================= */
     const style = document.createElement("style");
     style.innerHTML = `
@@ -167,25 +146,18 @@
     `;
     document.body.appendChild(virtualCursor);
 
-    // Track Mouse/Touchpad Movement & Update Hover State
+    // Track Movement & Update Hover State
     window.addEventListener("mousemove", (e) => {
         const wrapper = document.getElementById("wrapper");
         const controls = document.getElementById("controls");
-        const playerModal = document.getElementById('playerModal');
         
-        // Agar cursor controls ke upar hai toh isHovering = true
+        // Update TV hover state seamlessly
         if (controls && controls.contains(e.target)) {
             isHovering = true;
         } else {
             isHovering = false;
         }
 
-        // Kisi bhi movement par 3s ka timer reset karo
-        if (playerModal && playerModal.classList.contains('show')) {
-            resetIdleTimer();
-        }
-
-        // Virtual Cursor Render karna (Fullscreen/Landscape mein)
         const isFullscreen = document.fullscreenElement != null;
         const isRotated = wrapper && wrapper.classList.contains("player-landscape");
 
@@ -198,30 +170,9 @@
         }
     }, true);
 
-    // Touch karne par bhi timer reset hoga
-    window.addEventListener("touchstart", (e) => {
-        const playerModal = document.getElementById('playerModal');
-        if (playerModal && playerModal.classList.contains('show')) {
-            resetIdleTimer();
-        }
-    }, true);
-
     window.addEventListener("mouseout", () => {
         virtualCursor.style.display = "none";
-        isHovering = false; // Screen se cursor bahar, hover off
+        isHovering = false;
     });
-
-    // ANTI-HIDE SAFETY LOOP:
-    // Agar native `curl.js` ka timer hover ke bawajood controls chupane ki koshish kare, 
-    // toh ye loop usey pakad kar turant wapas show kar dega (Bulletproof system).
-    setInterval(() => {
-        const playerModal = document.getElementById('playerModal');
-        if (playerModal && playerModal.classList.contains('show')) {
-            const video = document.getElementById('video');
-            if (isHovering || (video && video.paused)) {
-                forceShowUI();
-            }
-        }
-    }, 500);
 
 })();
