@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         TV Back Button & Cursor Fix – Seamless V3
+// @name         TV Back Button & Cursor Fix – Seamless V3 (With Splash & Perms)
 // @run-at       document-idle
 // @grant        GM_setClipboard
 // @grant        GM_getClipboard
@@ -12,12 +12,70 @@
 // ==/UserScript==
 
 (function () {
-    let lastBackTime = 0;
-    let isHovering = false; // TV Virtual Cursor hover check
+    /* =========================================================
+       0. SPLASH SCREEN LOGIC (FIRST TIME LOAD)
+       ========================================================= */
+    function showSplashScreen() {
+        // Only show once per session to prevent annoyance on every page navigation
+        if (sessionStorage.getItem('tvAppSplashShown')) return;
+        sessionStorage.setItem('tvAppSplashShown', 'true');
+
+        // Attempt to find the site's favicon, fallback to root favicon.ico
+        const faviconUrl = document.querySelector("link[rel*='icon']")?.href || '/favicon.ico';
+
+        // Create the full-screen overlay
+        const splash = document.createElement('div');
+        splash.id = 'tv-splash-screen';
+        splash.style.cssText = `
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background-color: #0a0a0a; z-index: 2147483647;
+            display: flex; justify-content: center; align-items: center;
+            opacity: 1; transition: opacity 0.8s ease-out;
+        `;
+
+        // Create the pulsing favicon image
+        const img = document.createElement('img');
+        img.src = faviconUrl;
+        img.style.cssText = `
+            width: 120px; height: 120px; border-radius: 20%;
+            box-shadow: 0 0 20px rgba(255,255,255,0.1);
+            animation: tv-splash-pulse 1s infinite alternate;
+        `;
+
+        // Inject animation keyframes
+        const animStyle = document.createElement('style');
+        animStyle.innerHTML = `
+            @keyframes tv-splash-pulse {
+                0% { transform: scale(1); box-shadow: 0 0 15px rgba(255,255,255,0.1); }
+                100% { transform: scale(1.15); box-shadow: 0 0 40px rgba(255,255,255,0.4); }
+            }
+        `;
+        document.head.appendChild(animStyle);
+
+        splash.appendChild(img);
+        document.body.appendChild(splash);
+
+        // Handle Image Fallback (if favicon fails to load, remove splash early)
+        img.onerror = () => { splash.remove(); };
+
+        // Fade out and remove after 2 seconds
+        setTimeout(() => {
+            splash.style.opacity = '0';
+            setTimeout(() => {
+                if (splash.parentNode) splash.remove();
+            }, 800); // wait for fade transition to finish
+        }, 2000);
+    }
+
+    // Trigger splash screen on init
+    showSplashScreen();
 
     /* =========================================================
        1. HISTORY TRAP & PLAYER STATES
        ========================================================= */
+    let lastBackTime = 0;
+    let isHovering = false; // TV Virtual Cursor hover check
+
     function ensureHistoryTrap() {
         const playerModal = document.getElementById('playerModal');
         if (playerModal && playerModal.classList.contains('show')) {
@@ -33,7 +91,6 @@
             mutations.forEach((mutation) => {
                 if (mutation.target.classList.contains('show')) {
                     ensureHistoryTrap();
-                    // Naye curl.js ko trigger karo UI show karne ke liye (native timer start hoga)
                     const wrapper = document.getElementById('wrapper');
                     if (wrapper) wrapper.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
                 } else if (location.hash === '#tv-trap') {
@@ -51,13 +108,11 @@
         const now = Date.now();
         const timeDiff = now - lastBackTime;
         
-        // Debounce: Android TV glitch protection
         if (timeDiff < 250) {
             if (e.type === 'popstate') ensureHistoryTrap();
             return;
         }
 
-        // DOUBLE PRESS TO EXIT
         if (timeDiff <= 800) {
             lastBackTime = now;
             const closeBtn = document.getElementById('closePlayerBtn');
@@ -72,28 +127,23 @@
         const isControlsHidden = controls && controls.classList.contains('ui-hidden');
         const isRotated = wrapper && wrapper.classList.contains('player-landscape');
 
-        // SCENARIO 1: Agar landscape hai, pehle usey normal karo
         if (isRotated) {
             document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }));
             ensureHistoryTrap();
             return;
         }
 
-        // SCENARIO 2: Agar controls chhupe hain -> Native curl.js ko event bhej kar UI dikhao
         if (isControlsHidden) {
             if (wrapper) {
-                // Ye direct curl (4).js ka 5-second native timer start kar dega
                 wrapper.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, cancelable: true }));
             }
             ensureHistoryTrap();
             return;
         }
         
-        // SCENARIO 3: Agar controls dikh rahe hain aur hum hover NAHI kar rahe -> Force Hide karo
         if (!isControlsHidden) {
             if (!isHovering) {
                 const video = document.getElementById('video');
-                // Video paused hone par manually chupaane ki zaroorat nahi
                 if (video && !video.paused) {
                     const els = ['controls', 'videoTitle', 'centerPlayBtn', 'closePlayerBtn'];
                     els.forEach(id => {
@@ -154,12 +204,10 @@
     `;
     document.body.appendChild(virtualCursor);
 
-    // Track Movement & Update Hover State
     window.addEventListener("mousemove", (e) => {
         const wrapper = document.getElementById("wrapper");
         const controls = document.getElementById("controls");
         
-        // Update TV hover state seamlessly
         if (controls && controls.contains(e.target)) {
             isHovering = true;
         } else {
