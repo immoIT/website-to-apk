@@ -1,6 +1,14 @@
 // ==UserScript==
 // @name         TV Back Button & Cursor Fix – Seamless V3
 // @run-at       document-idle
+// @grant        GM_setClipboard
+// @grant        GM_getClipboard
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @grant        GM_deleteValue
+// @grant        GM_xmlhttpRequest
+// @grant        GM_download
+// @connect      *
 // ==/UserScript==
 
 (function () {
